@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --pink: #FFB6C1;
+  --pink-deep: #FF85A1;
+  --yellow: #FFFF66;
+  --yellow-muted: #FFFACD;
+  --sky: #87CEEB;
+  --sky-deep: #5BB8D4;
+  --black: #0D0D0D;
+  --black-soft: #1A1A1A;
+  --white: #FFFFFF;
+  --gray-50: #F9F9F9;
+  --gray-100: #F0F0F0;
+  --gray-200: #E0E0E0;
+  --gray-400: #999999;
+  --gray-600: #555555;
+  --font-display: 'Syne', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.08);
+  --shadow-md: 0 4px 20px rgba(0,0,0,0.12);
+  --shadow-lg: 0 8px 40px rgba(0,0,0,0.16);
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-xl: 32px;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--white);
+  color: var(--black);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  line-height: 1.15;
+}
+
+button { cursor: pointer; font-family: var(--font-body); }
+input, textarea, select { font-family: var(--font-body); }
+a { text-decoration: none; color: inherit; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--gray-100); }
+::-webkit-scrollbar-thumb { background: var(--gray-400); border-radius: 3px; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(32px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-16px) rotate(3deg); }
+}
+@keyframes floatAlt {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-10px) rotate(-3deg); }
+}
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-float { animation: float 8s ease-in-out infinite; }
+.animate-floatAlt { animation: floatAlt 7s ease-in-out infinite; }
+.animate-float-6 { animation: float 6s ease-in-out infinite; }
+.animate-float-5 { animation: float 5s ease-in-out infinite; }
+.animate-marquee { animation: marquee 18s linear infinite; }
+.animate-spin-slow { animation: spin-slow 0.7s linear infinite; }
+.animate-fadeUp { animation: fadeUp 0.4s ease both; }
+.animate-fadeIn { animation: fadeIn 0.2s ease; }
+.fade-up { animation: fadeUp 0.6s ease both; }
+.fade-in { animation: fadeIn 0.4s ease both; }
+
+.delay-1 { animation-delay: 0.1s; }
+.delay-2 { animation-delay: 0.2s; }
+.delay-3 { animation-delay: 0.3s; }
+.delay-4 { animation-delay: 0.4s; }
+.delay-5 { animation-delay: 0.5s; }
+.delay-6 { animation-delay: 0.6s; }
+
+.marquee-wrap {
+  overflow: hidden;
+  border-top: 2px solid var(--black);
+  border-bottom: 2px solid var(--black);
+  background: var(--yellow);
+  padding: 12px 0;
+}
+
+.marquee-track {
+  display: flex;
+  animation: marquee 18s linear infinite;
+  width: max-content;
+}
+
+.marquee-item {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--black);
+  padding: 0 32px;
+  position: relative;
+}
+
+.marquee-item::after {
+  content: '✦';
+  margin-left: 32px;
+}
