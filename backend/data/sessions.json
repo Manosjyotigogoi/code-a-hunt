@@ -1,0 +1,20 @@
+[
+  {
+    "userId": "1389c761-dabd-490c-b247-f5334746f1e9",
+    "date": "2026-03-13",
+    "totalOnlineMinutes": 1,
+    "activeMinutes": 0,
+    "breaks": 0,
+    "focusLevel": 10,
+    "updatedAt": "2026-03-13T23:06:33.153Z"
+  },
+  {
+    "userId": "1389c761-dabd-490c-b247-f5334746f1e9",
+    "date": "2026-03-18",
+    "totalOnlineMinutes": 2,
+    "activeMinutes": 0,
+    "breaks": 0,
+    "focusLevel": 1,
+    "updatedAt": "2026-03-18T18:00:14.174Z"
+  }
+]

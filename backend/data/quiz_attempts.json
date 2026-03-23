@@ -1,0 +1,49 @@
+[
+  {
+    "id": "1389c761-dabd-490c-b247-f5334746f1e9_Mathematics_1773441787474",
+    "userId": "1389c761-dabd-490c-b247-f5334746f1e9",
+    "subject": "Mathematics",
+    "correct": 0,
+    "total": 2,
+    "score": 0,
+    "accuracy": 0,
+    "difficulty": 5,
+    "previousScore": 0,
+    "timeTakenSeconds": 55,
+    "questions": [
+      {
+        "question": "Determine if the matrix A = [[1, 2], [3, 4]] is invertible.",
+        "type": "short",
+        "userAnswer": null,
+        "correctAnswer": "No"
+      },
+      {
+        "question": "Given a 3x3 matrix B = [[5, 0, 0], [0, 6, 0], [0, 0, 7]]. Find the determinant of matrix B.",
+        "type": "short",
+        "userAnswer": null,
+        "correctAnswer": "210"
+      },
+      {
+        "question": "Which one is the correct transpose of matrix C = [[a, b], [c, d]] ?",
+        "type": "mcq",
+        "userAnswer": null,
+        "correctAnswer": "b"
+      },
+      {
+        "question": "In matrix D = [[w, x, y], [z, t, u]], which element can be represented as: ad-jc ?",
+        "type": "mcq",
+        "userAnswer": null,
+        "correctAnswer": "x"
+      },
+      {
+        "question": "If S = [[0, 1, 0], [0, 0, 1], [1, 0, 0]]; T^n = S. What is the value of n?",
+        "type": "long",
+        "userAnswer": null,
+        "correctAnswer": "3"
+      }
+    ],
+    "createdAt": "2026-03-13T22:43:07.474Z",
+    "date": "2026-03-13",
+    "time": "22:43"
+  }
+]
