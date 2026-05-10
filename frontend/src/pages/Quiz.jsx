@@ -4,9 +4,8 @@ import Sidebar from '../components/Sidebar';
 import DashHeader from '../components/DashHeader';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
-import { Timer, CheckCircle2, XCircle, Trophy, ChevronRight, RotateCcw, Brain } from 'lucide-react';
+import { Timer, CheckCircle2, XCircle, Trophy, ChevronRight, RotateCcw, Brain, Loader2 } from 'lucide-react';
 
-// ─── tiny helpers ───────────────────────────────────────────────────────────
 const pad = n => String(n).padStart(2, '0');
 function fmtTime(secs) { return `${pad(Math.floor(secs / 60))}:${pad(secs % 60)}`; }
 function now() { return new Date(); }
@@ -16,8 +15,7 @@ function fmtDateTime(iso) {
     + ' · ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 }
 
-// ─── Phases ─────────────────────────────────────────────────────────────────
-const PHASE = { SETUP: 'setup', LOADING: 'loading', QUIZ: 'quiz', RESULT: 'result' };
+const PHASE = { SETUP: 'setup', LOADING: 'loading', QUIZ: 'quiz', GRADING: 'grading', RESULT: 'result' };
 
 export default function Quiz() {
   const { eduData } = useAuth();
@@ -30,8 +28,9 @@ export default function Quiz() {
   const [count, setCount] = useState(10);
   const [questions, setQuestions] = useState([]);
   const [currentIdx, setCurrentIdx] = useState(0);
-  const [selected, setSelected] = useState({}); // { qIdx: chosenAnswer }
-  const [revealed, setRevealed] = useState({}); // { qIdx: true } for short/long
+  const [selected, setSelected] = useState({});       // MCQ: { qIdx: chosenOption }
+  const [textAnswers, setTextAnswers] = useState({});  // short/long: { qIdx: typedText }
+  const [grades, setGrades] = useState([]);            // AI grades per question after submit
   const [elapsed, setElapsed] = useState(0);
   const [startedAt, setStartedAt] = useState(null);
   const [result, setResult] = useState(null);
@@ -39,14 +38,8 @@ export default function Quiz() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const timerRef = useRef(null);
 
-  // Load quiz history on mount
-  useEffect(() => {
-    if (subject) loadHistory(subject);
-  }, []);
-
-  useEffect(() => {
-    if (subject) loadHistory(subject);
-  }, [subject]);
+  useEffect(() => { if (subject) loadHistory(subject); }, []);
+  useEffect(() => { if (subject) loadHistory(subject); }, [subject]);
 
   const loadHistory = async (sub) => {
     setLoadingHistory(true);
@@ -57,7 +50,6 @@ export default function Quiz() {
     setLoadingHistory(false);
   };
 
-  // Timer
   useEffect(() => {
     if (phase === PHASE.QUIZ) {
       setStartedAt(now());
@@ -69,17 +61,11 @@ export default function Quiz() {
     return () => clearInterval(timerRef.current);
   }, [phase]);
 
-  // ── Generate questions via backend AI ──────────────────────────────────
   const handleStart = async () => {
     setPhase(PHASE.LOADING);
-    setSelected({}); setRevealed({});
+    setSelected({}); setTextAnswers({}); setGrades([]);
     try {
-      const { data } = await api.post('/ai/questions', {
-        subject,
-        context: topic || `General ${subject}`,
-        count,
-      });
-      // Ensure all MCQs have options array
+      const { data } = await api.post('/ai/questions', { subject, context: topic || `General ${subject}`, count });
       const qs = (data.questions || []).map(q => ({
         ...q,
         type: q.type || 'mcq',
@@ -89,83 +75,118 @@ export default function Quiz() {
       setCurrentIdx(0);
       setPhase(PHASE.QUIZ);
     } catch (err) {
-      const message = err?.response?.data?.error || err?.message || 'Failed to generate questions.';
-      alert(`Failed to generate questions: ${message}`);
+      alert(`Failed to generate questions: ${err?.response?.data?.error || err?.message}`);
       setPhase(PHASE.SETUP);
     }
   };
 
-  // ── Answer selection ────────────────────────────────────────────────────
   const selectAnswer = (qIdx, answer) => {
-    if (selected[qIdx] !== undefined) return; // locked
+    if (selected[qIdx] !== undefined) return;
     setSelected(s => ({ ...s, [qIdx]: answer }));
   };
 
-  const revealAnswer = (qIdx) => {
-    setRevealed(r => ({ ...r, [qIdx]: true }));
+  const setTextAnswer = (qIdx, text) => {
+    setTextAnswers(t => ({ ...t, [qIdx]: text }));
   };
 
-  // ── Submit quiz ─────────────────────────────────────────────────────────
+  // Check how many questions are answered
+  const answeredCount = questions.reduce((count, q, i) => {
+    if (q.type === 'mcq') return selected[i] !== undefined ? count + 1 : count;
+    return textAnswers[i]?.trim() ? count + 1 : count;
+  }, 0);
+
   const handleSubmit = async () => {
     clearInterval(timerRef.current);
     const timeTaken = Math.round((now() - startedAt) / 1000);
+    setPhase(PHASE.GRADING);
 
-    // Count correct answers for MCQs only (auto-gradeable)
-    let correct = 0;
-    let gradeable = 0;
-    questions.forEach((q, i) => {
-      if (q.type === 'mcq') {
-        gradeable++;
-        const userAnswer = selected[i];
-        if (userAnswer !== undefined) {
-          // Compare by option text or by index A/B/C/D
-          const correctLetter = q.answer?.trim().charAt(0).toUpperCase();
-          const selectedLetter = String.fromCharCode(65 + (q.options || []).indexOf(userAnswer));
-          if (correctLetter && selectedLetter === correctLetter) correct++;
-          else if (userAnswer === q.answer) correct++;
-        }
-      }
+    // ── 1. Grade MCQs locally ──────────────────────────────────────────
+    let mcqCorrect = 0;
+    let mcqTotal = 0;
+    const mcqResults = questions.map((q, i) => {
+      if (q.type !== 'mcq') return null;
+      mcqTotal++;
+      const userAnswer = selected[i];
+      const correctLetter = q.answer?.trim().charAt(0).toUpperCase();
+      const selectedLetter = userAnswer ? String.fromCharCode(65 + (q.options || []).indexOf(userAnswer)) : '';
+      const isCorrect = (correctLetter && selectedLetter === correctLetter) || userAnswer === q.answer;
+      if (isCorrect) mcqCorrect++;
+      return { score: isCorrect ? 10 : 0, feedback: isCorrect ? 'Correct!' : `Correct answer: ${q.answer}`, isCorrect };
     });
 
-    // For non-MCQ questions — user self-reports (we count revealed = attempted)
-    const nonMCQ = questions.filter(q => q.type !== 'mcq');
-    const nonMCQRevealed = nonMCQ.filter((_, i) => {
-      const absIdx = questions.findIndex((q, qi) => q.type !== 'mcq' && qi > (gradeable - 1 + i));
-      return revealed[absIdx];
-    }).length;
+    // ── 2. Grade short/long answers via AI ────────────────────────────
+    const openAnswers = questions
+      .map((q, i) => ({ ...q, idx: i }))
+      .filter(q => q.type !== 'mcq');
 
-    const totalGraded = gradeable;
-    const totalQuestions = questions.length;
+    let aiGrades = [];
+    if (openAnswers.length > 0) {
+      try {
+        const { data } = await api.post('/ai/grade', {
+          answers: openAnswers.map(q => ({
+            question: q.question,
+            userAnswer: textAnswers[q.idx] || '',
+            correctAnswer: q.answer,
+            type: q.type,
+          })),
+        });
+        aiGrades = data.grades || [];
+      } catch {
+        aiGrades = openAnswers.map(() => ({ score: 0, feedback: 'Could not grade.', isCorrect: false }));
+      }
+    }
 
+    // ── 3. Merge all grades ───────────────────────────────────────────
+    const allGrades = [];
+    let aiIdx = 0;
+    questions.forEach((q, i) => {
+      if (q.type === 'mcq') {
+        allGrades.push(mcqResults[i]);
+      } else {
+        allGrades.push(aiGrades[aiIdx++] || { score: 0, feedback: 'Not graded.', isCorrect: false });
+      }
+    });
+    setGrades(allGrades);
+
+    // ── 4. Calculate final score ──────────────────────────────────────
+    // Each question worth 10 points → total = questions.length * 10
+    const totalPointsEarned = allGrades.reduce((sum, g) => sum + (g?.score || 0), 0);
+    const totalPointsPossible = questions.length * 10;
+    const score = Math.round((totalPointsEarned / totalPointsPossible) * 100);
+    const correct = mcqCorrect + allGrades.filter((g, i) => questions[i]?.type !== 'mcq' && g?.isCorrect).length;
+
+    // ── 5. Save to backend ────────────────────────────────────────────
     const resultData = {
       subject,
       correct,
-      total: totalGraded || totalQuestions,
+      total: questions.length,
+      totalPointsEarned,
+      totalPointsPossible,
       timeTakenSeconds: timeTaken,
       questions: questions.map((q, i) => ({
         question: q.question,
         type: q.type,
-        userAnswer: selected[i] || null,
+        userAnswer: q.type === 'mcq' ? (selected[i] || null) : (textAnswers[i] || null),
         correctAnswer: q.answer,
+        pointsEarned: allGrades[i]?.score || 0,
+        feedback: allGrades[i]?.feedback || '',
       })),
     };
 
     try {
       const { data } = await api.post('/quiz/save', resultData);
-      setResult(data.attempt);
-      loadHistory(subject);
+      setResult({ ...data.attempt, score, totalPointsEarned, totalPointsPossible });
     } catch {
-      setResult({ ...resultData, score: Math.round((correct / (totalGraded || 1)) * 100) });
+      setResult({ ...resultData, score });
     }
     setPhase(PHASE.RESULT);
+    loadHistory(subject);
   };
 
   const q = questions[currentIdx];
   const totalQ = questions.length;
-  const answeredCount = Object.keys(selected).length + Object.keys(revealed).length;
-  const progress = totalQ > 0 ? (currentIdx / totalQ) * 100 : 0;
+  const progress = totalQ > 0 ? ((currentIdx + 1) / totalQ) * 100 : 0;
 
-  // ── Scoring colour ──────────────────────────────────────────────────────
   const scoreColor = (score) => score >= 80 ? '#2d8a4e' : score >= 50 ? '#d97706' : '#e53e3e';
   const scoreBg = (score) => score >= 80 ? '#f0fdf4' : score >= 50 ? '#fffbeb' : '#fff5f5';
   const scoreBorder = (score) => score >= 80 ? '#bbf7d0' : score >= 50 ? '#fde68a' : '#fecaca';
@@ -187,7 +208,7 @@ export default function Quiz() {
                   </div>
                   <h2 className="text-[22px] font-extrabold">Start a Quiz</h2>
                 </div>
-                <p className="text-sm text-[#555555] mb-6">Test yourself with AI-generated questions. Your scores track difficulty and feed the AI study planner.</p>
+                <p className="text-sm text-[#555555] mb-6">Test yourself with AI-generated questions. MCQs are auto-graded. Short/long answers are graded by AI after submission.</p>
 
                 <div className="flex gap-4 flex-wrap items-end">
                   <div className="flex flex-col gap-1.5 flex-1 min-w-[160px]">
@@ -270,6 +291,15 @@ export default function Quiz() {
             </div>
           )}
 
+          {/* ── GRADING ───────────────────────────────────────────── */}
+          {phase === PHASE.GRADING && (
+            <div className="flex flex-col items-center justify-center flex-1 gap-4 animate-fadeIn">
+              <Loader2 size={48} className="animate-spin text-[#FFB6C1]" />
+              <p className="text-[17px] font-bold">AI is grading your answers…</p>
+              <p className="text-sm text-[#555555]">Evaluating short & long answers. This may take a few seconds.</p>
+            </div>
+          )}
+
           {/* ── QUIZ ──────────────────────────────────────────────── */}
           {phase === PHASE.QUIZ && q && (
             <div className="flex flex-col gap-4 animate-fadeIn max-w-[700px]">
@@ -296,7 +326,7 @@ export default function Quiz() {
                   <span className={`text-[11px] font-bold tracking-widest px-2.5 py-[3px] rounded-full border-[1.5px] border-[#0D0D0D] ${
                     q.type === 'mcq' ? 'bg-[#87CEEB]' : q.type === 'short' ? 'bg-[#FFB6C1]' : 'bg-[#FFFF66]'
                   }`}>{q.type?.toUpperCase()}</span>
-                  <span className="text-xs font-semibold text-[#999]">{answeredCount} answered</span>
+                  <span className="text-xs font-semibold text-[#999]">{answeredCount} / {totalQ} answered</span>
                 </div>
 
                 <p className="text-[16px] font-semibold leading-relaxed mb-5">{q.question}</p>
@@ -308,47 +338,34 @@ export default function Quiz() {
                       const letter = String.fromCharCode(65 + j);
                       const isSelected = selected[currentIdx] === opt;
                       const isLocked = selected[currentIdx] !== undefined;
-                      const correctLetter = q.answer?.trim().charAt(0).toUpperCase();
-                      const isCorrect = isLocked && letter === correctLetter;
-                      const isWrong = isLocked && isSelected && !isCorrect;
                       return (
                         <button key={j} onClick={() => selectAnswer(currentIdx, opt)}
                           className={`flex items-center gap-3 px-4 py-3 border-2 rounded-[10px] text-sm text-left transition-all w-full ${
-                            isCorrect ? 'border-green-500 bg-[#f0fdf4] font-semibold' :
-                            isWrong ? 'border-red-400 bg-[#fff5f5]' :
                             isSelected ? 'border-[#0D0D0D] bg-[#87CEEB] font-semibold' :
                             isLocked ? 'border-[#E0E0E0] opacity-60 cursor-default' :
                             'border-[#E0E0E0] hover:border-[#0D0D0D] hover:bg-[#F9F9F9] cursor-pointer'
                           }`}>
                           <span className="w-7 h-7 rounded-full bg-[#0D0D0D] text-white text-[11px] font-bold flex items-center justify-center flex-shrink-0">{letter}</span>
                           <span className="flex-1">{opt}</span>
-                          {isCorrect && <CheckCircle2 size={16} className="text-green-500 flex-shrink-0" />}
-                          {isWrong && <XCircle size={16} className="text-red-400 flex-shrink-0" />}
+                          {isSelected && <CheckCircle2 size={16} className="text-[#0D0D0D] flex-shrink-0" />}
                         </button>
                       );
                     })}
-                    {selected[currentIdx] !== undefined && (
-                      <div className="mt-1 px-4 py-2.5 bg-[#f0fdf4] border-2 border-[#bbf7d0] rounded-[8px] text-[13px]">
-                        <strong>Correct answer:</strong> {q.answer}
-                      </div>
-                    )}
+                    <p className="text-[11px] text-[#999] mt-1">⚠️ Answers will be revealed after you submit the quiz.</p>
                   </div>
                 )}
 
-                {/* Short / Long answer */}
+                {/* Short / Long answer — textarea input */}
                 {q.type !== 'mcq' && (
-                  <div>
-                    {!revealed[currentIdx] ? (
-                      <button onClick={() => revealAnswer(currentIdx)}
-                        className="px-5 py-2.5 bg-[#FFFF66] border-2 border-[#0D0D0D] rounded-[8px] text-sm font-bold hover:-translate-y-0.5 transition-all">
-                        Reveal Answer
-                      </button>
-                    ) : (
-                      <div className="px-4 py-3.5 bg-[#fffbeb] border-2 border-[#fde68a] rounded-[10px] text-sm leading-relaxed">
-                        <p className="text-[11px] font-bold uppercase tracking-wide text-[#d97706] mb-1.5">Model Answer</p>
-                        {q.answer}
-                      </div>
-                    )}
+                  <div className="flex flex-col gap-2">
+                    <textarea
+                      value={textAnswers[currentIdx] || ''}
+                      onChange={e => setTextAnswer(currentIdx, e.target.value)}
+                      placeholder={q.type === 'short' ? 'Write your answer here (2-3 sentences)…' : 'Write your detailed answer here…'}
+                      rows={q.type === 'short' ? 3 : 6}
+                      className="w-full px-4 py-3 border-2 border-[#0D0D0D] rounded-[10px] text-sm outline-none focus:shadow-[0_0_0_3px_#87CEEB] transition-all resize-none"
+                    />
+                    <p className="text-[11px] text-[#999]">✏️ Write your answer above. AI will grade it after you submit.</p>
                   </div>
                 )}
               </div>
@@ -360,14 +377,17 @@ export default function Quiz() {
                   ← Prev
                 </button>
                 <div className="flex gap-1.5 items-center flex-1 justify-center overflow-x-auto">
-                  {questions.map((_, i) => (
-                    <button key={i} onClick={() => setCurrentIdx(i)}
-                      className={`w-8 h-8 rounded-full border-[1.5px] text-xs font-bold flex-shrink-0 transition-all ${
-                        i === currentIdx ? 'bg-[#0D0D0D] text-[#FFFF66] border-[#0D0D0D]' :
-                        (selected[i] !== undefined || revealed[i]) ? 'bg-[#FFB6C1] border-[#0D0D0D]' :
-                        'bg-white border-[#E0E0E0] hover:border-[#0D0D0D]'
-                      }`}>{i + 1}</button>
-                  ))}
+                  {questions.map((q2, i) => {
+                    const isAnswered = q2.type === 'mcq' ? selected[i] !== undefined : !!textAnswers[i]?.trim();
+                    return (
+                      <button key={i} onClick={() => setCurrentIdx(i)}
+                        className={`w-8 h-8 rounded-full border-[1.5px] text-xs font-bold flex-shrink-0 transition-all ${
+                          i === currentIdx ? 'bg-[#0D0D0D] text-[#FFFF66] border-[#0D0D0D]' :
+                          isAnswered ? 'bg-[#FFB6C1] border-[#0D0D0D]' :
+                          'bg-white border-[#E0E0E0] hover:border-[#0D0D0D]'
+                        }`}>{i + 1}</button>
+                    );
+                  })}
                 </div>
                 {currentIdx < totalQ - 1 ? (
                   <button onClick={() => setCurrentIdx(i => i + 1)}
@@ -381,12 +401,20 @@ export default function Quiz() {
                   </button>
                 )}
               </div>
+
+              {/* Unanswered warning */}
+              {answeredCount < totalQ && (
+                <p className="text-xs text-center text-[#d97706] font-semibold">
+                  ⚠️ {totalQ - answeredCount} question{totalQ - answeredCount !== 1 ? 's' : ''} unanswered. You can still submit.
+                </p>
+              )}
             </div>
           )}
 
           {/* ── RESULT ────────────────────────────────────────────── */}
           {phase === PHASE.RESULT && result && (
-            <div className="flex flex-col gap-5 animate-fadeUp max-w-[600px]">
+            <div className="flex flex-col gap-5 animate-fadeUp max-w-[700px]">
+              {/* Score card */}
               <div className="bg-white border-2 border-[#0D0D0D] rounded-[24px] p-8 text-center">
                 <div className="w-24 h-24 rounded-full border-4 border-[#0D0D0D] mx-auto mb-5 flex flex-col items-center justify-center"
                   style={{ background: `conic-gradient(${scoreColor(result.score)} calc(${result.score} * 1%), #E0E0E0 0)` }}>
@@ -398,6 +426,7 @@ export default function Quiz() {
                 </h2>
                 <p className="text-sm text-[#555555] mb-6">
                   {result.correct} / {result.total} correct · {fmtTime(result.timeTakenSeconds || 0)} taken
+                  {result.totalPointsEarned != null && ` · ${result.totalPointsEarned}/${result.totalPointsPossible} pts`}
                 </p>
 
                 <div className="grid grid-cols-3 gap-3 mb-6">
@@ -415,11 +444,11 @@ export default function Quiz() {
                 </div>
 
                 <p className="text-[13px] text-[#555555] mb-6 px-4">
-                  ✅ Your quiz data has been saved and will be used to personalise your AI study timetable.
+                  ✅ Your quiz data has been saved and will update your AI timetable.
                 </p>
 
                 <div className="flex gap-3 justify-center flex-wrap">
-                  <button onClick={() => { setPhase(PHASE.SETUP); setQuestions([]); setSelected({}); setRevealed({}); }}
+                  <button onClick={() => { setPhase(PHASE.SETUP); setQuestions([]); setSelected({}); setTextAnswers({}); setGrades([]); }}
                     className="flex items-center gap-1.5 px-5 py-2.5 border-2 border-[#0D0D0D] rounded-[8px] bg-white text-sm font-semibold hover:bg-[#F0F0F0] transition-colors">
                     <RotateCcw size={14} /> New Quiz
                   </button>
@@ -427,6 +456,61 @@ export default function Quiz() {
                     className="flex items-center gap-1.5 px-5 py-2.5 bg-[#0D0D0D] text-[#FFFF66] border-2 border-[#0D0D0D] rounded-[8px] text-sm font-bold hover:-translate-y-0.5 transition-all">
                     View AI Timetable →
                   </button>
+                </div>
+              </div>
+
+              {/* Per-question review */}
+              <div className="bg-white border-2 border-[#0D0D0D] rounded-[24px] overflow-hidden">
+                <div className="px-6 py-4 border-b-2 border-[#0D0D0D] bg-[#F9F9F9]">
+                  <h3 className="text-[17px] font-extrabold">📋 Question Review</h3>
+                  <p className="text-xs text-[#555555] mt-0.5">See correct answers and AI feedback for each question</p>
+                </div>
+                <div className="divide-y divide-[#F0F0F0]">
+                  {questions.map((q2, i) => {
+                    const grade = grades[i];
+                    const userAns = q2.type === 'mcq' ? selected[i] : textAnswers[i];
+                    const isCorrect = grade?.isCorrect;
+                    return (
+                      <div key={i} className="px-6 py-4">
+                        <div className="flex items-start gap-3">
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${isCorrect ? 'bg-green-100' : 'bg-red-100'}`}>
+                            {isCorrect
+                              ? <CheckCircle2 size={14} className="text-green-600" />
+                              : <XCircle size={14} className="text-red-500" />}
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[11px] font-bold text-[#555555]">Q{i + 1}</span>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                                q2.type === 'mcq' ? 'bg-[#87CEEB] border-[#87CEEB]' :
+                                q2.type === 'short' ? 'bg-[#FFB6C1] border-[#FFB6C1]' : 'bg-[#FFFF66] border-[#FFFF66]'
+                              }`}>{q2.type?.toUpperCase()}</span>
+                              {grade?.score != null && (
+                                <span className="text-[11px] font-bold text-[#555555] ml-auto">{grade.score}/10 pts</span>
+                              )}
+                            </div>
+                            <p className="text-sm font-semibold mb-2">{q2.question}</p>
+                            {userAns && (
+                              <div className={`px-3 py-2 rounded-[8px] text-xs mb-2 ${isCorrect ? 'bg-[#f0fdf4] border border-[#bbf7d0]' : 'bg-[#fff5f5] border border-[#fecaca]'}`}>
+                                <span className="font-bold">Your answer: </span>{userAns}
+                              </div>
+                            )}
+                            {!userAns && (
+                              <div className="px-3 py-2 rounded-[8px] text-xs mb-2 bg-[#f5f5f5] border border-[#e0e0e0]">
+                                <span className="font-bold text-[#999]">No answer given</span>
+                              </div>
+                            )}
+                            <div className="px-3 py-2 rounded-[8px] text-xs bg-[#fffbeb] border border-[#fde68a]">
+                              <span className="font-bold">Model answer: </span>{q2.answer}
+                            </div>
+                            {grade?.feedback && !isCorrect && (
+                              <p className="text-[11px] text-[#555555] mt-1.5">💡 {grade.feedback}</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>

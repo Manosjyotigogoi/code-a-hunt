@@ -29,12 +29,16 @@ router.get('/', authMiddleware, async (req, res) => {
 // POST /api/quiz/save
 router.post('/save', authMiddleware, async (req, res) => {
   try {
-    const { subject, correct, total, questions, timeTakenSeconds } = req.body;
+    const { subject, correct, total, questions, timeTakenSeconds, totalPointsEarned, totalPointsPossible } = req.body;
     if (!subject || total == null)
       return res.status(400).json({ error: 'subject and total are required.' });
 
-    const accuracy   = total > 0 ? correct / total : 0;
-    const score      = Math.round(accuracy * 100);
+    // Use AI-graded points if available, otherwise fall back to correct/total
+    const pointsEarned = totalPointsEarned ?? correct ?? 0;
+    const pointsPossible = totalPointsPossible ?? total ?? 1;
+
+    const accuracy = pointsPossible > 0 ? pointsEarned / pointsPossible : 0;
+    const score = Math.round(accuracy * 100);
     const difficulty = Math.max(1, Math.min(5, 5 - accuracy * 4));
 
     const now = new Date().toISOString();
@@ -48,20 +52,20 @@ router.post('/save', authMiddleware, async (req, res) => {
     const previousScore = lastAttempt ? lastAttempt.score : score;
 
     const attempt = new QuizAttempt({
-      id:               uuidv4(),   // Bug 5 fix: use uuid instead of string with subject
-      userId:           req.userId,
+      id: uuidv4(),
+      userId: req.userId,
       subject,
-      correct:          correct || 0,
+      correct: correct || 0,
       total,
       score,
-      accuracy:         Math.round(accuracy * 100) / 100,
-      difficulty:       Math.round(difficulty * 100) / 100,
+      accuracy: Math.round(accuracy * 100) / 100,
+      difficulty: Math.round(difficulty * 100) / 100,
       previousScore,
       timeTakenSeconds: timeTakenSeconds || 0,
-      questions:        questions || [],
-      createdAt:        now,
-      date:             now.split('T')[0],
-      time:             now.split('T')[1].slice(0, 5),
+      questions: questions || [],
+      createdAt: now,
+      date: now.split('T')[0],
+      time: now.split('T')[1].slice(0, 5),
     });
     await attempt.save();
 
@@ -85,12 +89,12 @@ router.get('/summary/all', authMiddleware, async (req, res) => {
     }
 
     const summary = Object.values(bySubject).map(a => ({
-      name:              a.subject,
+      name: a.subject,
       correct_questions: a.correct,
-      total_questions:   a.total,
-      latest_score:      a.score,
-      difficulty:        a.difficulty,
-      previous_score:    a.previousScore,
+      total_questions: a.total,
+      latest_score: a.score,
+      difficulty: a.difficulty,
+      previous_score: a.previousScore,
     }));
 
     res.json({ summary });
